@@ -11,7 +11,7 @@ import imageio.v2 as imageio
 
 # Función de aptitud
 def fitness_function(x):
-    return np.log(1 + x + 50 * np.abs(x)) + 5 * np.sin(x)
+    return x * np.cos(x)
 
 # Calcular el valor de la función
 def calculate_function(func, x_value):
@@ -191,7 +191,6 @@ def genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, ma
 
         # Elitismo: conservar el mejor individuo de la generación anterior
         best_individual_previous_generation = best_individual
-        #---------------------------------------------- implementar en esta parte el promedio ----------------------------------------------
         new_population.append(best_individual_previous_generation)
 
         for parent1, parent2 in pairs:
@@ -221,7 +220,7 @@ def genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, ma
         plot_generation(generation, population, lower_limit, upper_limit, problem_type)
 
     plot_statistics(generations, best_y, worst_y, average_y)
-    create_video_from_images('Generaciones', 'output_video.mp4')
+    create_video_from_images('Generaciones', 'generaciones.mp4')
 
     # Actualizar la tabla con los resultados del mejor individuo de la última generación
     table.delete(*table.get_children())
