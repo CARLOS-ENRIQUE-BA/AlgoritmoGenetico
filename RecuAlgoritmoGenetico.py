@@ -172,7 +172,7 @@ def create_video_from_images(folder_path, output_file):
     video.close()
 
 # Algoritmo genético principal
-def genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, max_pop_size, num_generations, mutation_prob_ind, mutation_prob_gen, problem_type, console_output, table):
+def genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, max_pop_size, num_generations, mutation_prob_ind, mutation_prob_gen, problem_type, table):
     delta, bit_length, value_range = calculate_initial_params(lower_limit, upper_limit, resolution)
     population = generate_initial_population(initial_pop_size, value_range, bit_length, lower_limit, delta)
 
@@ -182,12 +182,8 @@ def genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, ma
     average_y = []
 
     # Graficar e imprimir la población inicial (Generación 0)
-    console_output.insert(tk.END, "Generación 0:\n")
     plot_generation(0, population, lower_limit, upper_limit, problem_type)
     best_individual = max(population, key=lambda individual: individual['y']) if problem_type == "maximizacion" else min(population, key=lambda individual: individual['y'])
-    for individual in population:
-        console_output.insert(tk.END, f"id: {individual['id']}, decimal: {individual['decimal']}, x: {individual['x']:.3f}, y: {individual['y']:.3f}\n")
-    table.insert("", tk.END, values=(0, best_individual['x'], best_individual['y']))
 
     for generation in range(1, num_generations + 1):
         pairs = pair_individuals(population)
@@ -199,118 +195,95 @@ def genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, ma
         new_population.append(best_individual_previous_generation)
 
         for parent1, parent2 in pairs:
-            new_binary1, new_binary2 = multiple_point_crossover(parent1, parent2, bit_length)
-            new_binary1 = mutate(new_binary1, mutation_prob_gen, mutation_prob_ind)
-            new_binary2 = mutate(new_binary2, mutation_prob_gen, mutation_prob_ind)
-            new_individual1, new_individual2 = create_new_individuals(new_binary1, new_binary2, lower_limit, delta)
-            new_population.extend([new_individual1, new_individual2])
+            child_binary1, child_binary2 = multiple_point_crossover(parent1, parent2, bit_length)
 
-        # Poda de la población, manteniendo los mejores
+            child_binary1 = mutate(child_binary1, mutation_prob_gen, mutation_prob_ind)
+            child_binary2 = mutate(child_binary2, mutation_prob_gen, mutation_prob_ind)
+
+            child1, child2 = create_new_individuals(child_binary1, child_binary2, lower_limit, delta)
+            new_population.append(child1)
+            new_population.append(child2)
+
         population = prune_population(new_population, max_pop_size, problem_type)
 
-        # Graficar e imprimir la población de la generación actual
-        console_output.insert(tk.END, f"Generación {generation}:\n")
-        plot_generation(generation, population, lower_limit, upper_limit, problem_type)
-        best_individual = max(population, key=lambda individual: individual['y']) if problem_type == "maximizacion" else min(population, key=lambda individual: individual['y'])
-        worst_individual = min(population, key=lambda individual: individual['y']) if problem_type == "maximizacion" else max(population, key=lambda individual: individual['y'])
-        average_individual = sum(individual['y'] for individual in population) / len(population)
-
-        for individual in population:
-            console_output.insert(tk.END, f"id: {individual['id']}, decimal: {individual['decimal']}, x: {individual['x']:.3f}, y: {individual['y']:.3f}\n")
-
-        table.insert("", tk.END, values=(generation, best_individual['x'], best_individual['y']))
+        if problem_type == "maximizacion":
+            best_individual = max(population, key=lambda individual: individual['y'])
+            worst_individual = min(population, key=lambda individual: individual['y'])
+        else:
+            best_individual = min(population, key=lambda individual: individual['y'])
+            worst_individual = max(population, key=lambda individual: individual['y'])
 
         generations.append(generation)
         best_y.append(best_individual['y'])
         worst_y.append(worst_individual['y'])
-        average_y.append(average_individual)
+        average_y.append(sum(individual['y'] for individual in population) / len(population))
 
-    # Graficar estadísticas de todas las generaciones
+        plot_generation(generation, population, lower_limit, upper_limit, problem_type)
+
     plot_statistics(generations, best_y, worst_y, average_y)
+    create_video_from_images('Generaciones', 'output_video.mp4')
 
-    # Crear el video de las generaciones en formato .mp4
-    create_video_from_images('Generaciones', 'generaciones.mp4')
+    # Actualizar la tabla con los resultados del mejor individuo de la última generación
+    table.delete(*table.get_children())
+    table.insert("", "end", values=(best_individual['binary'], best_individual['decimal'], best_individual['x'], best_individual['y']))
 
-    console_output.insert(tk.END, "¡Ejecución del algoritmo completada!\n")
-    console_output.yview(tk.END)
-
-# Configuración de la interfaz gráfica
-def setup_interface():
+# Interfaz gráfica
+def run_gui():
     root = tk.Tk()
     root.title("Algoritmo Genético")
+    root.geometry("800x600")
 
-    # Crear los widgets
-    lbl_lower_limit = ttk.Label(root, text="Límite Inferior:")
-    lbl_upper_limit = ttk.Label(root, text="Límite Superior:")
-    lbl_resolution = ttk.Label(root, text="Resolución:")
-    lbl_initial_pop_size = ttk.Label(root, text="Tamaño Población Inicial:")
-    lbl_max_pop_size = ttk.Label(root, text="Tamaño Máximo Población:")
-    lbl_num_generations = ttk.Label(root, text="Número de Generaciones:")
-    lbl_mutation_prob_ind = ttk.Label(root, text="Probabilidad de Mutación (Individuo):")
-    lbl_mutation_prob_gen = ttk.Label(root, text="Probabilidad de Mutación (Gen):")
-    lbl_problem_type = ttk.Label(root, text="Tipo de Problema:")
+    parameters_frame = tk.Frame(root)
+    parameters_frame.pack(pady=10)
 
-    entry_lower_limit = ttk.Entry(root)
-    entry_upper_limit = ttk.Entry(root)
-    entry_resolution = ttk.Entry(root)
-    entry_initial_pop_size = ttk.Entry(root)
-    entry_max_pop_size = ttk.Entry(root)
-    entry_num_generations = ttk.Entry(root)
-    entry_mutation_prob_ind = ttk.Entry(root)
-    entry_mutation_prob_gen = ttk.Entry(root)
+    table_frame = tk.Frame(root)
+    table_frame.pack(pady=10)
 
-    combo_problem_type = ttk.Combobox(root, values=["maximizacion", "minimizacion"])
-    combo_problem_type.current(0)
+    labels = [
+        "Límite Inferior:", "Límite Superior:", "Resolución:", "Tamaño Población Inicial:",
+        "Tamaño Máximo Población:", "Número de Generaciones:", "Probabilidad de Mutación (Individuo):",
+        "Probabilidad de Mutación (Gen):", "Tipo de Problema:"
+    ]
 
-    console_output = scrolledtext.ScrolledText(root, width=80, height=20)
-    table = ttk.Treeview(root, columns=("Generación", "Mejor X", "Mejor Y"), show="headings")
-    table.heading("Generación", text="Generación")
-    table.heading("Mejor X", text="Mejor X")
-    table.heading("Mejor Y", text="Mejor Y")
+    entries = {}
+    for i, label in enumerate(labels):
+        tk.Label(parameters_frame, text=label).grid(row=i, column=0, sticky="e")
+        entry = tk.Entry(parameters_frame)
+        entry.grid(row=i, column=1)
+        entries[label] = entry
 
-    # Crear botón para ejecutar el algoritmo
-    btn_run = ttk.Button(root, text="Ejecutar", command=lambda: run_algorithm(entry_lower_limit, entry_upper_limit, entry_resolution, entry_initial_pop_size, entry_max_pop_size, entry_num_generations, entry_mutation_prob_ind, entry_mutation_prob_gen, combo_problem_type, console_output, table))
+    problem_type = ttk.Combobox(parameters_frame, values=["maximizacion", "minimizacion"], state="readonly")
+    problem_type.set("maximizacion")
+    problem_type.grid(row=8, column=1)
 
-    # Colocar los widgets en el grid
-    lbl_lower_limit.grid(row=0, column=0, sticky="e")
-    lbl_upper_limit.grid(row=1, column=0, sticky="e")
-    lbl_resolution.grid(row=2, column=0, sticky="e")
-    lbl_initial_pop_size.grid(row=3, column=0, sticky="e")
-    lbl_max_pop_size.grid(row=4, column=0, sticky="e")
-    lbl_num_generations.grid(row=5, column=0, sticky="e")
-    lbl_mutation_prob_ind.grid(row=6, column=0, sticky="e")
-    lbl_mutation_prob_gen.grid(row=7, column=0, sticky="e")
-    lbl_problem_type.grid(row=8, column=0, sticky="e")
+    columns = ("Cadena de Bits", "Valor de la Cadena", "Valor de X", "Valor de f(X)")
+    table = ttk.Treeview(table_frame, columns=columns, show="headings")
+    for col in columns:
+        table.heading(col, text=col)
+        table.column(col, width=150)
 
-    entry_lower_limit.grid(row=0, column=1)
-    entry_upper_limit.grid(row=1, column=1)
-    entry_resolution.grid(row=2, column=1)
-    entry_initial_pop_size.grid(row=3, column=1)
-    entry_max_pop_size.grid(row=4, column=1)
-    entry_num_generations.grid(row=5, column=1)
-    entry_mutation_prob_ind.grid(row=6, column=1)
-    entry_mutation_prob_gen.grid(row=7, column=1)
-    combo_problem_type.grid(row=8, column=1)
+    table.pack()
 
-    console_output.grid(row=9, column=0, columnspan=2)
-    table.grid(row=10, column=0, columnspan=2)
-    btn_run.grid(row=11, column=0, columnspan=2)
+    def run_algorithm():
+        try:
+            lower_limit = float(entries["Límite Inferior:"].get())
+            upper_limit = float(entries["Límite Superior:"].get())
+            resolution = float(entries["Resolución:"].get())
+            initial_pop_size = int(entries["Tamaño Población Inicial:"].get())
+            max_pop_size = int(entries["Tamaño Máximo Población:"].get())
+            num_generations = int(entries["Número de Generaciones:"].get())
+            mutation_prob_ind = float(entries["Probabilidad de Mutación (Individuo):"].get())
+            mutation_prob_gen = float(entries["Probabilidad de Mutación (Gen):"].get())
+            problem_type_value = problem_type.get()
+
+            genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, max_pop_size, num_generations,
+                              mutation_prob_ind, mutation_prob_gen, problem_type_value, table)
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+
+    tk.Button(root, text="Ejecutar", command=run_algorithm).pack(pady=10)
 
     root.mainloop()
 
-# Función para ejecutar el algoritmo con los parámetros de la interfaz
-def run_algorithm(entry_lower_limit, entry_upper_limit, entry_resolution, entry_initial_pop_size, entry_max_pop_size, entry_num_generations, entry_mutation_prob_ind, entry_mutation_prob_gen, combo_problem_type, console_output, table):
-    lower_limit = float(entry_lower_limit.get())
-    upper_limit = float(entry_upper_limit.get())
-    resolution = float(entry_resolution.get())
-    initial_pop_size = int(entry_initial_pop_size.get())
-    max_pop_size = int(entry_max_pop_size.get())
-    num_generations = int(entry_num_generations.get())
-    mutation_prob_ind = float(entry_mutation_prob_ind.get())
-    mutation_prob_gen = float(entry_mutation_prob_gen.get())
-    problem_type = combo_problem_type.get()
-
-    genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, max_pop_size, num_generations, mutation_prob_ind, mutation_prob_gen, problem_type, console_output, table)
-
-# Configurar y ejecutar la interfaz gráfica
-setup_interface()
+if __name__ == "__main__":
+    run_gui()
