@@ -1,288 +1,315 @@
-import math
-import random
 import os
-import numpy as np
+import random
+import math
 import matplotlib.pyplot as plt
-from sympy import symbols, lambdify
+import numpy as np
 import cv2
+from prettytable import PrettyTable
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
-import imageio.v2 as imageio  
+from tkinter import messagebox, scrolledtext
 
-# Función de aptitud
-def fitness_function(x):
+def funcion_fitness(x):
     return x * np.cos(x)
 
-# Calcular el valor de la función
-def calculate_function(func, x_value):
-    x = symbols('x')
-    expression = lambdify(x, func, 'numpy')
-    return expression(x_value)
+funcion_aptitud = funcion_fitness
 
-# Calcular el valor de x a partir de un número binario
-def binary_to_x(binary_value, lower_limit, delta):
-    return lower_limit + binary_value * delta
+def calcular_longitud_bits(valor_inicio, valor_fin, precision):
+    return math.ceil(math.log2((valor_fin - valor_inicio) / precision + 1))
 
-# Crear nuevos individuos
-def create_new_individuals(binary1, binary2, lower_limit, delta):
-    decimal1 = int(binary1, 2)
-    decimal2 = int(binary2, 2)
-    x1 = binary_to_x(decimal1, lower_limit, delta)
-    x2 = binary_to_x(decimal2, lower_limit, delta)
-    y1 = fitness_function(x1)
-    y2 = fitness_function(x2)
+def flotante_a_binario(valor, valor_minimo, valor_maximo, longitud_bits):
+    valor_escalado = (valor - valor_minimo) / (valor_maximo - valor_minimo) * (2 ** longitud_bits - 1)
+    return format(int(valor_escalado), '0' + str(longitud_bits) + 'b')
 
-    new_individual1 = {'id': None, 'binary': binary1, 'decimal': decimal1, 'x': x1, 'y': y1}
-    new_individual2 = {'id': None, 'binary': binary2, 'decimal': decimal2, 'x': x2, 'y': y2}
+def binario_a_flotante(cadena_binaria, valor_minimo, valor_maximo, longitud_bits):
+    valor_entero = int(cadena_binaria, 2)
+    return valor_minimo + valor_entero * (valor_maximo - valor_minimo) / (2 ** longitud_bits - 1)
 
-    return new_individual1, new_individual2
+def evaluar_aptitud(individuo, maximizar, valor_minimo, valor_maximo, longitud_bits):
+    x = binario_a_flotante(individuo, valor_minimo, valor_maximo, longitud_bits)
+    f = funcion_aptitud(x)
+    return f if maximizar else -f
 
-# Mutación de individuos por intercambio de bits
-def mutate(individual_binary, mutation_prob_gen, mutation_prob_ind):
-    binary_list = list(individual_binary)
-    if random.random() < mutation_prob_ind:
-        for i in range(len(binary_list)):
-            if random.random() < mutation_prob_gen:
-                pos2 = random.randint(0, len(binary_list) - 1)
-                binary_list[i], binary_list[pos2] = binary_list[pos2], binary_list[i]
-    return ''.join(binary_list)
+def crear_poblacion_inicial(cantidad, valor_minimo, valor_maximo, longitud_bits):
+    return [flotante_a_binario(random.uniform(valor_minimo, valor_maximo), valor_minimo, valor_maximo, longitud_bits) for _ in range(cantidad)]
 
-# Cruce de individuos con múltiples puntos de cruza
-def multiple_point_crossover(parent1, parent2, bit_length):
-    num_crossover_points = random.randint(1, bit_length - 1)
-    crossover_points = sorted(random.sample(range(1, bit_length), num_crossover_points))
+def seleccionar_pares(poblacion, n):
+    pares = []
+    for i in range(len(poblacion)):
+        m = random.randint(0, len(poblacion) - 1)
+        indices_cruce = set()
+        intentos = 0
+        while len(indices_cruce) < m and intentos < 10 * len(poblacion):
+            j = random.randint(0, len(poblacion) - 1)
+            if j != i:
+                indices_cruce.add(j)
+            intentos += 1
+        for j in indices_cruce:
+            pares.append((poblacion[i], poblacion[j]))
+    return pares
 
-    new_binary1 = list(parent1['binary'])
-    new_binary2 = list(parent2['binary'])
+def cruzar(par, longitud_bits):
+    n_puntos = random.randint(1, longitud_bits - 1)
+    puntos_cruce = sorted(random.sample(range(1, longitud_bits), n_puntos))
+    
+    hijo1, hijo2 = list(par[0]), list(par[1])
+    
+    for i in range(len(puntos_cruce)):
+        if i % 2 == 0:
+            if i == len(puntos_cruce) - 1:
+                hijo1[puntos_cruce[i]:], hijo2[puntos_cruce[i]:] = par[1][puntos_cruce[i]:], par[0][puntos_cruce[i]:]
+            else:
+                hijo1[puntos_cruce[i]:puntos_cruce[i + 1]], hijo2[puntos_cruce[i]:puntos_cruce[i + 1]] = par[1][puntos_cruce[i]:puntos_cruce[i + 1]], par[0][puntos_cruce[i]:puntos_cruce[i + 1]]
+    
+    return ''.join(hijo1), ''.join(hijo2)
 
-    for i in range(len(crossover_points)):
-        if i % 2 == 1:
-            continue
-        start = crossover_points[i]
-        end = crossover_points[i + 1] if i + 1 < len(crossover_points) else bit_length
-        new_binary1[start:end], new_binary2[start:end] = new_binary2[start:end], new_binary1[start:end]
+def mutar(individuo, prob_mutacion_gen, prob_mutacion_individuo, longitud_bits):
+    if random.random() < prob_mutacion_individuo:
+        individuo = list(individuo)
+        for i in range(longitud_bits):
+            if random.random() < prob_mutacion_gen:
+                pos1 = random.randint(0, longitud_bits - 1)
+                pos2 = random.randint(0, longitud_bits - 1)
+                individuo[pos1], individuo[pos2] = individuo[pos2], individuo[pos1]
+        return ''.join(individuo)
+    return individuo
 
-    return ''.join(new_binary1), ''.join(new_binary2)
+def podar(poblacion, max_poblacion, valor_minimo, valor_maximo, maximizar, longitud_bits):
+    poblacion_unica = list(set(poblacion))
+    poblacion_unica.sort(key=lambda ind: evaluar_aptitud(ind, maximizar, valor_minimo, valor_maximo, longitud_bits), reverse=maximizar)
+    if len(poblacion_unica) > max_poblacion:
+        mejor_individuo = poblacion_unica[0]
+        a_mantener = random.sample(poblacion_unica[1:], max_poblacion - 1)
+        a_mantener.append(mejor_individuo)
+        poblacion_unica = a_mantener
+    estadisticas = {
+        "max": evaluar_aptitud(poblacion_unica[0], maximizar, valor_minimo, valor_maximo, longitud_bits),
+        "min": evaluar_aptitud(poblacion_unica[-1], maximizar, valor_minimo, valor_maximo, longitud_bits),
+        "promedio": sum(evaluar_aptitud(ind, maximizar, valor_minimo, valor_maximo, longitud_bits) for ind in poblacion_unica) / len(poblacion_unica)
+    }
+    return poblacion_unica, estadisticas
 
-# Formar parejas según la estrategia A1
-def pair_individuals(population):
-    pairs = []
-    for individual in population:
-        num_mates = random.randint(1, len(population) - 1)
-        mates = random.sample([ind for ind in population if ind != individual], num_mates)
-        for mate in mates:
-            pairs.append((individual, mate))
-    return pairs
+def graficar_funcion_con_individuos(valores_x, valores_y, individuos, mejor, peor, generacion, carpeta, valor_minimo, valor_maximo, maximizar, longitud_bits):
+    plt.figure(figsize=(10, 5))
+    plt.plot(valores_x, valores_y, label=f'f(x) = {funcion_aptitud.__name__}')
 
-# Poda de la población, manteniendo los mejores (estrategia P1)
-def prune_population(population, max_pop_size, problem_type):
-    unique_population = {individual['decimal']: individual for individual in population}.values()
-    sorted_population = sorted(unique_population, key=lambda x: x['y'], reverse=(problem_type == "maximizacion"))
-    return list(sorted_population)[:max_pop_size]
+    x_individuos = [binario_a_flotante(ind, valor_minimo, valor_maximo, longitud_bits) for ind in individuos]
+    y_individuos = [funcion_aptitud(x) for x in x_individuos]
 
-# Generar la población inicial
-def generate_initial_population(pop_size, value_range, bit_length, lower_limit, delta):
-    population = []
-    for i in range(pop_size):
-        random_value = random.randint(0, value_range - 1)
-        binary_value = bin(random_value)[2:].zfill(bit_length)
-        x_value = binary_to_x(random_value, lower_limit, delta)
-        y_value = fitness_function(x_value)
-        individual = {'id': i + 1, 'binary': binary_value, 'decimal': random_value, 'x': x_value, 'y': y_value}
-        population.append(individual)
-    return population
+    plt.scatter(x_individuos, y_individuos, color='blue', label='Individuos', alpha=0.6)
 
-# Calcular parámetros iniciales
-def calculate_initial_params(lower_limit, upper_limit, resolution):
-    range_value = upper_limit - lower_limit
-    num_points = math.ceil(range_value / resolution) + 1
-    bit_length = math.ceil(math.log2(num_points))
-    delta = range_value / ((2 ** bit_length) - 1)
-    value_range = 2 ** bit_length
-    return delta, bit_length, value_range
+    mejor_x = binario_a_flotante(mejor, valor_minimo, valor_maximo, longitud_bits)
+    mejor_y = funcion_aptitud(mejor_x)
+    peor_x = binario_a_flotante(peor, valor_minimo, valor_maximo, longitud_bits)
+    peor_y = funcion_aptitud(peor_x)
 
-# Graficar estadísticas de todas las generaciones
-def plot_statistics(generations, best_y, worst_y, average_y):
-    plt.figure()
-    plt.plot(generations, best_y, label='Mejor Individuo')
-    plt.plot(generations, worst_y, label='Peor Individuo')
-    plt.plot(generations, average_y, label='Promedio')
-
-    plt.title('Evolución del fitness')
-    plt.xlabel('Generación')
-    plt.ylabel('Valor de la Función Objetivo')
-    plt.legend()
-
-    folder_path = 'Media_Generaciones'
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    plt.savefig(os.path.join(folder_path, 'IMG_Media_Generaciones.png'))
-    plt.close()
-
-# Graficar la población de una generación
-def plot_generation(generation, population, lower_limit, upper_limit, problem_type):
-    plt.clf()
-    plt.xlim(lower_limit, upper_limit)
-    plt.title(f'Generación {generation}')
-    plt.xlabel('X')
-    plt.ylabel('f(X)')
-
-    x_values = [individual['x'] for individual in population]
-    y_values = [individual['y'] for individual in population]
-
-    plt.scatter(x_values, y_values, label="Individuos", s=90, c="#45aaf2", alpha=0.4)
-
-    if problem_type == "maximizacion":
-        best_individual = max(population, key=lambda individual: individual['y'])
-        worst_individual = min(population, key=lambda individual: individual['y'])
+    if maximizar:
+        plt.scatter([mejor_x], [mejor_y], color='green', label='Mejor Individuo', s=100, edgecolor='black')
+        plt.scatter([peor_x], [peor_y], color='red', label='Peor Individuo', s=100, edgecolor='black')
     else:
-        best_individual = min(population, key=lambda individual: individual['y'])
-        worst_individual = max(population, key=lambda individual: individual['y'])
+        plt.scatter([mejor_x], [mejor_y], color='red', label='Peor Individuo', s=100, edgecolor='black')
+        plt.scatter([peor_x], [peor_y], color='green', label='Mejor Individuo', s=100, edgecolor='black')
 
-    x_func = np.linspace(lower_limit, upper_limit, 200)
-    y_func = fitness_function(x_func)
-    plt.plot(x_func, y_func)
-
-    plt.scatter(best_individual['x'], best_individual['y'], c='green', label='Mejor Individuo', s=90)
-    plt.scatter(worst_individual['x'], worst_individual['y'], c='red', label='Peor Individuo', s=90)
-
+    plt.xlabel('x')
+    plt.ylabel('f(x)')
+    plt.title(f'Función y Individuos - Generación {generacion}')
     plt.legend()
+    plt.grid(True)
 
-    folder_path = 'Generaciones'
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+    plt.xlim(valor_minimo, valor_maximo)
+    plt.ylim(min(valores_y), max(valores_y))
 
-    plt.savefig(os.path.join(folder_path, f'IMG_Generacion_{generation}.png'))
+    nombre_grafica = f"Generacion_{generacion}.png"
+    plt.savefig(os.path.join(carpeta, nombre_grafica))
     plt.close()
 
-# Crear el video de las generaciones en formato .mp4
-def create_video_from_images(folder_path, output_file):
-    images = [img for img in os.listdir(folder_path) if img.endswith(".png")]
-    images.sort(key=lambda x: int(x.split('_')[2].split('.')[0]))  # Ordenar imágenes por número de generación
+def graficar_evolucion(mejores_aptitudes, peores_aptitudes, aptitudes_promedio, carpeta, maximizar):
+    plt.figure(figsize=(10, 5))
+    
+    plt.plot(mejores_aptitudes, label='Mejor Aptitud', color='green')
+    plt.plot(peores_aptitudes, label='Peor Aptitud', color='red')
+    plt.plot(aptitudes_promedio, label='Aptitud Promedio', color='blue')
 
-    frame = cv2.imread(os.path.join(folder_path, images[0]))
+    plt.xlabel('Generación')
+    plt.ylabel('Aptitud')
+    if maximizar:
+        plt.title('Evolución de la Maximización de Aptitudes')
+    else:
+        plt.title('Evolución de la Minimización de Aptitudes')
+
+    plt.legend()
+    plt.grid(True)
+
+    plt.savefig(os.path.join(carpeta, 'Evolucion_Aptitud.png'))
+    plt.close()
+
+def crear_video(carpeta, numero_generaciones):
+    carpeta_imagenes = carpeta
+    nombre_video = 'VideoAlgoritmoGenetico.avi'
+
+    imagenes = [f"Generacion_{i}.png" for i in range(0, numero_generaciones + 1)]
+    frame = cv2.imread(os.path.join(carpeta_imagenes, imagenes[0]))
     height, width, layers = frame.shape
 
-    video = imageio.get_writer(output_file, fps=1, codec='libx264')
+    video = cv2.VideoWriter(
+        nombre_video, cv2.VideoWriter_fourcc(*'DIVX'), 1, (width, height))
 
-    for image in images:
-        video.append_data(imageio.imread(os.path.join(folder_path, image)))
+    for imagen in imagenes:
+        video.write(cv2.imread(os.path.join(carpeta_imagenes, imagen)))
 
-    video.close()
+    cv2.destroyAllWindows()
+    video.release()
 
-# Algoritmo genético principal
-def genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, max_pop_size, num_generations, mutation_prob_ind, mutation_prob_gen, problem_type, table):
-    delta, bit_length, value_range = calculate_initial_params(lower_limit, upper_limit, resolution)
-    population = generate_initial_population(initial_pop_size, value_range, bit_length, lower_limit, delta)
+def validar_entradas():
+    try:
+        valor_inicio = float(entrada_valor_inicio.get())
+        valor_fin = float(entrada_valor_fin.get())
+        precision = float(entrada_precision.get())
+        numero_generaciones = int(entrada_numero_generaciones.get())
+        prob_mutacion_gen = float(entrada_prob_mutacion_gen.get())
+        prob_mutacion_individuo = float(entrada_prob_mutacion_individuo.get())
+        cantidad_individuos = int(entrada_cantidad_individuos.get())
+        max_poblacion = int(entrada_max_poblacion.get())
+        
+        if valor_fin < valor_inicio:
+            messagebox.showerror("Error de Validación", "El valor final no puede ser menor que el valor inicial.")
+            return False
+        if not (0 < precision <= 1):
+            messagebox.showerror("Error de Validación", "Delta X debe estar entre 0 y 1.")
+            return False
+        if not (0 <= prob_mutacion_gen <= 1):
+            messagebox.showerror("Error de Validación", "La probabilidad de mutación del gen debe estar entre 0 y 1.")
+            return False
+        if not (0 <= prob_mutacion_individuo <= 1):
+            messagebox.showerror("Error de Validación", "La probabilidad de mutación del individuo debe estar entre 0 y 1.")
+            return False
+        if numero_generaciones <= 0 or cantidad_individuos <= 0 or max_poblacion <= 0:
+            messagebox.showerror("Error de Validación", "El número de generaciones, individuos y población máxima deben ser números enteros positivos.")
+            return False
 
-    generations = []
-    best_y = []
-    worst_y = []
-    average_y = []
+        return True
+    except ValueError:
+        messagebox.showerror("Error de Validación", "Por favor, ingrese valores válidos en todos los campos.")
+        return False
 
-    # Graficar e imprimir la población inicial (Generación 0)
-    plot_generation(0, population, lower_limit, upper_limit, problem_type)
-    best_individual = max(population, key=lambda individual: individual['y']) if problem_type == "maximizacion" else min(population, key=lambda individual: individual['y'])
+def ejecutar_algoritmo_genetico():
+    if not validar_entradas():
+        return
 
-    for generation in range(1, num_generations + 1):
-        pairs = pair_individuals(population)
-        new_population = []
+    valor_inicio = float(entrada_valor_inicio.get())
+    valor_fin = float(entrada_valor_fin.get())
+    precision = float(entrada_precision.get())
+    numero_generaciones = int(entrada_numero_generaciones.get())
+    maximizar = var_maximizar.get() == 1
+    prob_mutacion_gen = float(entrada_prob_mutacion_gen.get())
+    prob_mutacion_individuo = float(entrada_prob_mutacion_individuo.get())
+    cantidad_individuos = int(entrada_cantidad_individuos.get())
+    max_poblacion = int(entrada_max_poblacion.get())
 
-        # Elitismo: conservar el mejor individuo de la generación anterior
-        best_individual_previous_generation = best_individual
-        new_population.append(best_individual_previous_generation)
+    longitud_bits = calcular_longitud_bits(valor_inicio, valor_fin, precision)
+    valor_minimo = valor_inicio
+    valor_maximo = valor_fin
 
-        for parent1, parent2 in pairs:
-            child_binary1, child_binary2 = multiple_point_crossover(parent1, parent2, bit_length)
+    carpeta_graficas = "graficas"
+    if not os.path.exists(carpeta_graficas):
+        os.makedirs(carpeta_graficas)
 
-            child_binary1 = mutate(child_binary1, mutation_prob_gen, mutation_prob_ind)
-            child_binary2 = mutate(child_binary2, mutation_prob_gen, mutation_prob_ind)
+    valores_x = np.linspace(valor_minimo, valor_maximo, 400)
+    valores_y = [funcion_aptitud(x) for x in valores_x]
 
-            child1, child2 = create_new_individuals(child_binary1, child_binary2, lower_limit, delta)
-            new_population.append(child1)
-            new_population.append(child2)
+    poblacion = crear_poblacion_inicial(cantidad_individuos, valor_minimo, valor_maximo, longitud_bits)
+    mejores_aptitudes = []
+    peores_aptitudes = []
+    aptitudes_promedio = []
 
-        population = prune_population(new_population, max_pop_size, problem_type)
+    texto_resultados.delete('1.0', tk.END)
 
-        if problem_type == "maximizacion":
-            best_individual = max(population, key=lambda individual: individual['y'])
-            worst_individual = min(population, key=lambda individual: individual['y'])
-        else:
-            best_individual = min(population, key=lambda individual: individual['y'])
-            worst_individual = max(population, key=lambda individual: individual['y'])
+    for generacion in range(numero_generaciones + 1):
+        aptitudes = [evaluar_aptitud(ind, maximizar, valor_minimo, valor_maximo, longitud_bits) for ind in poblacion]
+        mejor_aptitud = max(aptitudes) if maximizar else min(aptitudes)
+        peor_aptitud = min(aptitudes) if maximizar else max(aptitudes)
+        aptitud_promedio = sum(aptitudes) / len(aptitudes)
 
-        generations.append(generation)
-        best_y.append(best_individual['y'])
-        worst_y.append(worst_individual['y'])
-        average_y.append(sum(individual['y'] for individual in population) / len(population))
+        mejores_aptitudes.append(mejor_aptitud)
+        peores_aptitudes.append(peor_aptitud)
+        aptitudes_promedio.append(aptitud_promedio)
 
-        plot_generation(generation, population, lower_limit, upper_limit, problem_type)
+        mejor_individuo = poblacion[aptitudes.index(mejor_aptitud)]
+        mejor_valor_x = binario_a_flotante(mejor_individuo, valor_minimo, valor_maximo, longitud_bits)
+        peor_individuo = poblacion[aptitudes.index(peor_aptitud)]
 
-    plot_statistics(generations, best_y, worst_y, average_y)
-    create_video_from_images('Generaciones', 'generaciones.mp4')
+        tabla = PrettyTable()
+        tabla.field_names = ["Generación", "Cadena de Bits", "Índice", "Valor de x", "Valor de Aptitud"]
+        tabla.add_row([generacion, mejor_individuo, aptitudes.index(mejor_aptitud), round(mejor_valor_x, 3), round(mejor_aptitud, 3)])
+        texto_resultados.insert(tk.END, tabla.get_string() + "\n")
 
-    # Actualizar la tabla con los resultados del mejor individuo de la última generación
-    table.delete(*table.get_children())
-    table.insert("", "end", values=(best_individual['binary'], best_individual['decimal'], best_individual['x'], best_individual['y']))
+        graficar_funcion_con_individuos(valores_x, valores_y, poblacion, mejor_individuo, peor_individuo, generacion, carpeta_graficas, valor_minimo, valor_maximo, maximizar, longitud_bits)
+        
+        if generacion < numero_generaciones:
+            pares = seleccionar_pares(poblacion, len(poblacion))
+            nueva_poblacion = []
 
-# Interfaz gráfica
-def run_gui():
-    root = tk.Tk()
-    root.title("Algoritmo Genético")
-    root.geometry("800x600")
+            for par in pares:
+                if random.random() < random.random():
+                    descendencia = cruzar(par, longitud_bits)
+                    nueva_poblacion.extend(descendencia)
+                else:
+                    nueva_poblacion.extend(par)
 
-    parameters_frame = tk.Frame(root)
-    parameters_frame.pack(pady=10)
+            nueva_poblacion = [mutar(ind, prob_mutacion_gen, prob_mutacion_individuo, longitud_bits) for ind in nueva_poblacion]
+            poblacion = [ind for ind in nueva_poblacion if valor_minimo <= binario_a_flotante(ind, valor_minimo, valor_maximo, longitud_bits) <= valor_maximo]
+            poblacion, estadisticas = podar(poblacion, max_poblacion, valor_minimo, valor_maximo, maximizar, longitud_bits)
+            poblacion.append(mejor_individuo)
 
-    table_frame = tk.Frame(root)
-    table_frame.pack(pady=10)
+    poblacion, estadisticas = podar(poblacion, max_poblacion, valor_minimo, valor_maximo, maximizar, longitud_bits)
 
-    labels = [
-        "Límite Inferior:", "Límite Superior:", "Resolución:", "Tamaño Población Inicial:",
-        "Tamaño Máximo Población:", "Número de Generaciones:", "Probabilidad de Mutación (Individuo):",
-        "Probabilidad de Mutación (Gen):", "Tipo de Problema:"
-    ]
+    graficar_evolucion(mejores_aptitudes, peores_aptitudes, aptitudes_promedio, carpeta_graficas, maximizar)
+    crear_video(carpeta_graficas, numero_generaciones)
 
-    entries = {}
-    for i, label in enumerate(labels):
-        tk.Label(parameters_frame, text=label).grid(row=i, column=0, sticky="e")
-        entry = tk.Entry(parameters_frame)
-        entry.grid(row=i, column=1)
-        entries[label] = entry
+root = tk.Tk()
+root.title("Algoritmo Genético")
 
-    problem_type = ttk.Combobox(parameters_frame, values=["maximizacion", "minimizacion"], state="readonly")
-    problem_type.set("maximizacion")
-    problem_type.grid(row=8, column=1)
+frame = tk.Frame(root, padx=10, pady=10)
+frame.grid(row=0, column=0, padx=10, pady=10)
 
-    columns = ("Cadena de Bits", "Valor de la Cadena", "Valor de X", "Valor de f(X)")
-    table = ttk.Treeview(table_frame, columns=columns, show="headings")
-    for col in columns:
-        table.heading(col, text=col)
-        table.column(col, width=150)
+tk.Label(frame, text="Valor Inicial:").grid(row=0, column=0, sticky=tk.W, pady=2)
+entrada_valor_inicio = tk.Entry(frame, width=30)
+entrada_valor_inicio.grid(row=0, column=1, pady=2)
 
-    table.pack()
+tk.Label(frame, text="Valor Final:").grid(row=1, column=0, sticky=tk.W, pady=2)
+entrada_valor_fin = tk.Entry(frame, width=30)
+entrada_valor_fin.grid(row=1, column=1, pady=2)
 
-    def run_algorithm():
-        try:
-            lower_limit = float(entries["Límite Inferior:"].get())
-            upper_limit = float(entries["Límite Superior:"].get())
-            resolution = float(entries["Resolución:"].get())
-            initial_pop_size = int(entries["Tamaño Población Inicial:"].get())
-            max_pop_size = int(entries["Tamaño Máximo Población:"].get())
-            num_generations = int(entries["Número de Generaciones:"].get())
-            mutation_prob_ind = float(entries["Probabilidad de Mutación (Individuo):"].get())
-            mutation_prob_gen = float(entries["Probabilidad de Mutación (Gen):"].get())
-            problem_type_value = problem_type.get()
+tk.Label(frame, text="Delta X:").grid(row=2, column=0, sticky=tk.W, pady=2)
+entrada_precision = tk.Entry(frame, width=30)
+entrada_precision.grid(row=2, column=1, pady=2)
 
-            genetic_algorithm(lower_limit, upper_limit, resolution, initial_pop_size, max_pop_size, num_generations,
-                              mutation_prob_ind, mutation_prob_gen, problem_type_value, table)
-        except ValueError as e:
-            messagebox.showerror("Error", str(e))
+tk.Label(frame, text="Número de Generaciones:").grid(row=3, column=0, sticky=tk.W, pady=2)
+entrada_numero_generaciones = tk.Entry(frame, width=30)
+entrada_numero_generaciones.grid(row=3, column=1, pady=2)
 
-    tk.Button(root, text="Ejecutar", command=run_algorithm).pack(pady=10)
+tk.Label(frame, text="Probabilidad de Mutación del Gen:").grid(row=4, column=0, sticky=tk.W, pady=2)
+entrada_prob_mutacion_gen = tk.Entry(frame, width=30)
+entrada_prob_mutacion_gen.grid(row=4, column=1, pady=2)
 
-    root.mainloop()
+tk.Label(frame, text="Probabilidad de Mutación del Individuo:").grid(row=5, column=0, sticky=tk.W, pady=2)
+entrada_prob_mutacion_individuo = tk.Entry(frame, width=30)
+entrada_prob_mutacion_individuo.grid(row=5, column=1, pady=2)
 
-if __name__ == "__main__":
-    run_gui()
+tk.Label(frame, text="Número de Individuos:").grid(row=6, column=0, sticky=tk.W, pady=2)
+entrada_cantidad_individuos = tk.Entry(frame, width=30)
+entrada_cantidad_individuos.grid(row=6, column=1, pady=2)
+
+tk.Label(frame, text="Población Máxima:").grid(row=7, column=0, sticky=tk.W, pady=2)
+entrada_max_poblacion = tk.Entry(frame, width=30)
+entrada_max_poblacion.grid(row=7, column=1, pady=2)
+
+tk.Label(frame, text="Maximizar Función:").grid(row=8, column=0, sticky=tk.W, pady=2)
+var_maximizar = tk.IntVar()
+tk.Checkbutton(frame, variable=var_maximizar).grid(row=8, column=1, sticky=tk.W, pady=2)
+
+tk.Button(frame, text="Ejecutar", command=ejecutar_algoritmo_genetico).grid(row=9, column=0, columnspan=2, pady=10)
+
+texto_resultados = scrolledtext.ScrolledText(root, width=80, height=20, padx=10, pady=10)
+texto_resultados.grid(row=1, column=0, padx=10, pady=10)
+
+root.mainloop()
